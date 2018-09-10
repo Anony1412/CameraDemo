@@ -14,6 +14,7 @@ import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
@@ -23,6 +24,7 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.RelativeLayout;
 import android.widget.Toast;
 
 import java.io.File;
@@ -37,11 +39,16 @@ import static android.Manifest.permission.CAMERA;
 public class PreviewDemo extends Activity implements View.OnClickListener {
 
     static final int REQUEST_CODE_USE_CAMERA = 164;
+    static final int REQUEST_CODE_WRITE_STORAGE = 165;
+    static final int REQUEST_CODE_READ_STORAGE = 166;
     static final int RESULT_LOAD_IMAGE = 203;
 
     static Bitmap mutableBitmap;
     ImageView mImage;
     ImageView image;
+
+    RelativeLayout rl_camera;
+    RelativeLayout rl_image;
 
     // Copy stack overflow
     private SurfaceView preview = null;
@@ -65,33 +72,27 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
     private MediaScannerConnection msConn;
     // Android Button
     private Button mBtnCapture, mBtnRotateCamera, mBtnSave, mBtnGalery;
+    private Button mBtnBackFromAlbum;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.preview);
 
+        // kiểm tra quyền ứng dụng đầu tiên
         requestPermissions();
-//        init();
+
     }
 
     Camera.PictureCallback photoCallback = new Camera.PictureCallback() {
         public void onPictureTaken(final byte[] data, final Camera camera) {
-//            mProgress = ProgressDialog.show(PreviewDemo.this, "", "Saving Photo");
-//            new Thread() {
-//                public void run() {
-//                    try {
-//                        Thread.sleep(1000);
-//                    } catch (Exception ex) {
-//                    }
-//                    onPictureTake(data, camera);
-//                }
-//            }.start();
+
             // Khi camera chụp xong, dữ liệu sẽ được lưu dưới dạng byte, và đổ vào biến data này.
             //Nhiệm vụ cần làm là lưu cái biến data này thành file trong bộ nhớ
             //thì sẽ được 1 cái ảnh
+
+            // biến dataxxx để lưu lại data (để mình tùy biến sử dụng chứ không lưu lại ngay)
             dataxxx = data;
-//            btSaveOnClicked(data);
         }
     };
 
@@ -101,9 +102,11 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
         @Override
         public void surfaceCreated(SurfaceHolder surfaceHolder) {
             try {
+
                 camera.setPreviewDisplay(previewHolder);
+
             } catch (Throwable t) {
-                Log.e("PreviewDemo-surfaceCallback",
+                Log.e("DIEULINH",
                         "Exception in setPreviewDisplay()", t);
                 Toast.makeText(PreviewDemo.this, t.getMessage(), Toast.LENGTH_LONG)
                         .show();
@@ -112,16 +115,24 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
 
         @Override
         public void surfaceChanged(SurfaceHolder surfaceHolder, int format, int width, int height) {
-            Camera.Parameters parameters = camera.getParameters();
-            Camera.Size size = getBestPreviewSize(width, height,
-                    parameters);
 
-            if (size != null) {
-                parameters.setPreviewSize(size.width, size.height);
-                camera.setParameters(parameters);
-                camera.startPreview();
-                inPreview = true;
+            if (camera != null) {
+                Camera.Parameters parameters = camera.getParameters();
+                Camera.Size size = getBestPreviewSize(width, height,
+                        parameters);
+
+                if (size != null) {
+                    parameters.setPreviewSize(size.width, size.height);
+                    camera.setParameters(parameters);
+                    camera.startPreview();
+                    inPreview = true;
+                } else {
+                    Log.e("DIEULINH", "hong o day nay");
+                }
+            } else {
+                Log.e("DIEULINH", "camera null!");
             }
+
         }
 
         @Override
@@ -145,7 +156,19 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+
+        // xin quyền dùng camera
         if (requestCode == REQUEST_CODE_USE_CAMERA) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // Đã cấp quyền - không làm gì cả
+                init();
+            } else {
+                Toast.makeText(this, "Vui lòng cấp quyền cho ứng dụng của bạn!", Toast.LENGTH_SHORT).show();
+            }
+        }
+
+        // xin quyền lưu ảnh vào gallery
+        if (requestCode == REQUEST_CODE_WRITE_STORAGE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 // Đã cấp quyền - không làm gì cả
                 init();
@@ -158,14 +181,12 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
 
     private void init() {
 
-        image = findViewById(R.id.image);
+        anhXa();
+        setClick();
+        settingCamera();
+    }
 
-        // ban đầu image được ẩn đi nhường màn hình cho cameraPreview
-        mImage = findViewById(R.id.img_mImageView);
-        mImage.setVisibility(View.INVISIBLE);
-
-        preview = findViewById(R.id.surface);
-
+    private void settingCamera() {
         previewHolder = preview.getHolder();
         previewHolder.addCallback(surfaceCallback);
         previewHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
@@ -173,46 +194,60 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
         previewHolder.setFixedSize(getWindow().getWindowManager().getDefaultDisplay().getWidth(),
                 getWindow().getWindowManager().getDefaultDisplay().getHeight());
 
-        mBtnCapture = findViewById(R.id.btn_capture);
+        try {
+            camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_FRONT);
+            FRONT_CAMERA_ON = true;
+        } catch (RuntimeException e) {
+            Log.e("onResume", e.getLocalizedMessage());
+        }
+    }
+
+    private void setClick() {
+
         mBtnCapture.setOnClickListener(this);
 
-        mBtnRotateCamera = findViewById(R.id.btn_rotatecamera);
         mBtnRotateCamera.setOnClickListener(this);
 
-        mBtnSave = findViewById(R.id.btn_save);
         mBtnSave.setOnClickListener(this);
         mBtnSave.setEnabled(false);
         mBtnSave.setVisibility(View.INVISIBLE);
 
-        mBtnGalery = findViewById(R.id.btn_gallery);
         mBtnGalery.setOnClickListener(this);
+
+        mBtnBackFromAlbum.setOnClickListener(this);
+    }
+
+    private void anhXa() {
+
+        image = findViewById(R.id.image);
+        preview = findViewById(R.id.surface);
+
+        rl_camera = findViewById(R.id.rl_camera);
+
+        mBtnCapture = findViewById(R.id.btn_capture);
+
+        mBtnRotateCamera = findViewById(R.id.btn_rotatecamera);
+
+        mBtnSave = findViewById(R.id.btn_save);
+
+        mBtnGalery = findViewById(R.id.btn_gallery);
+
+        mImage = findViewById(R.id.img_mImageView);
+
+        mBtnBackFromAlbum = findViewById(R.id.btn_backFromAlbum);
+
+        rl_image = findViewById(R.id.rl_image);
+        rl_image.setVisibility(View.GONE);
+
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        try {
-//            if (FRONT_CAMERA_ON == false) {
-//                camera.release();
-//                camera = null;
-                camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_FRONT);
-                FRONT_CAMERA_ON = true;
-//            }
-        } catch (RuntimeException e) {
-            Log.e("RUNTIME", "onResume: " + e);
-        }
-    }
 
-//    @Override
-//    protected void onPause() {
-//        super.onPause();
-//        if (inPreview) {
-//            camera.stopPreview();
-//        }
-//        camera.release();
-//        camera = null;
-//        inPreview = false;
-//    }
+        Log.e("DIEULINH", "chay vao ham onResume");
+
+    }
 
     private Camera.Size getBestPreviewSize(int width, int height, Camera.Parameters parameters) {
         Camera.Size result = null;
@@ -231,69 +266,9 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
         return result;
     }
 
-    // hàm này để biểu diễn các điểm ảnh bởi data, ảnh được chuyển qua hàm savePhoto để lưu thông qua đối tượng mutableBitmap
-//    public void onPictureTake(byte[] data, Camera camera) {
-//        bmp = BitmapFactory.decodeByteArray(data, 0, data.length);
-//        mutableBitmap = bmp.copy(Bitmap.Config.ARGB_8888, true);
-////        savePhoto(mutableBitmap);
-////        mProgress.dismiss();
-//
-////        new SavePhotoTask().execute();
-//    }
-
-//    public void savePhoto(Bitmap bmp) {
-//        imageFileFolder = new File(Environment.getExternalStorageDirectory(), "Rotate");
-//        imageFileFolder.mkdir(); // tạo một file
-//        FileOutputStream out = null;
-//        Calendar c = Calendar.getInstance();
-//        String date = fromInt(c.get(Calendar.MONTH))
-//                + fromInt(c.get(Calendar.DAY_OF_MONTH))
-//                + fromInt(c.get(Calendar.YEAR))
-//                + fromInt(c.get(Calendar.HOUR_OF_DAY))
-//                + fromInt(c.get(Calendar.MINUTE))
-//                + fromInt(c.get(Calendar.SECOND));
-//        imageFileName = new File(imageFileFolder, date.toString() + ".jpg");
-//        try {
-//            out = new FileOutputStream(imageFileName);
-//            bmp.compress(Bitmap.CompressFormat.JPEG, 100, out);
-//            out.flush();
-//            out.close();
-//            scanPhoto(imageFileName.toString());
-//            out = null;
-//        } catch (Exception e) {
-//            e.printStackTrace();
-//        }
-//    }
-
     public String fromInt(int val) {
         return String.valueOf(val);
     }
-
-    public void scanPhoto(final String imageFileName) {
-        msConn = new MediaScannerConnection(PreviewDemo.this, new MediaScannerConnection.MediaScannerConnectionClient() {
-            @SuppressLint("LongLogTag")
-            public void onMediaScannerConnected() {
-                msConn.scanFile(imageFileName, null);
-                Log.i("msClient obj  in Photo Utility", "connection established");
-            }
-
-            @SuppressLint("LongLogTag")
-            public void onScanCompleted(String path, Uri uri) {
-                msConn.disconnect();
-                Log.i("msClient obj in Photo Utility", "scan completed");
-            }
-        });
-        msConn.connect();
-    }
-
-    // hàm này để chụp ảnh, nhưng không cần vì có btn chụp ảnh rồi
-//    @Override
-//    public boolean onKeyDown(int keyCode, KeyEvent event) {
-//        if (keyCode == KeyEvent.KEYCODE_MENU && event.getRepeatCount() == 0) {
-//            onBack();
-//        }
-//        return super.onKeyDown(keyCode, event);
-//    }
 
     @Override
     public void onClick(View view) {
@@ -316,33 +291,53 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
 
             // lưu ảnh
             case R.id.btn_save: {
-//                savePhoto(mutableBitmap);
-//                mBtnSave.setVisibility(View.INVISIBLE);
-//                mBtnSave.setEnabled(false);
-
-                // quay lai man hinh chup anh
-                // Fail to connect to camera service
-//                camera = Camera.open();
-
-//                btSaveOnClicked();
-                btSaveOnClicked(dataxxx);
-                camera.startPreview();
-                mBtnCapture.setVisibility(View.VISIBLE);
-                mBtnCapture.setEnabled(true);
-                mBtnRotateCamera.setVisibility(View.VISIBLE);
-                mBtnRotateCamera.setEnabled(true);
-                mBtnSave.setVisibility(View.INVISIBLE);
-                mBtnSave.setEnabled(false);
+                // Đầu tiên xin cấp quyền lưu ảnh
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    // STORAGE - permission not permission group
+                    if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+                        btnSaveOnClicked();
+                    } else {
+                        ActivityCompat.requestPermissions(this, new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_CODE_WRITE_STORAGE);
+                    }
+                } else {
+                    btnSaveOnClicked();
+                }
                 break;
             }
 
             // mở album ảnh
             case R.id.btn_gallery: {
-
-                getImageFromAlbum();
+                // tương tự với lưu ảnh, ở đây cũng phải xin quyền truy cập storage trước
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    // STORAGE - permission not permission group
+                    if (checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+                        getImageFromAlbum();
+                    } else {
+                        ActivityCompat.requestPermissions(this, new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQUEST_CODE_READ_STORAGE);
+                    }
+                } else {
+                    getImageFromAlbum();
+                }
                 break;
             }
+
+            // từ album quay trở lại camera
+            case R.id.btn_backFromAlbum: {
+                rl_camera.setVisibility(View.VISIBLE);
+                rl_image.setVisibility(View.GONE);
+            }
         }
+    }
+
+    private void btnSaveOnClicked() {
+        saveToGallery(dataxxx);
+        camera.startPreview();
+        mBtnCapture.setVisibility(View.VISIBLE);
+        mBtnCapture.setEnabled(true);
+        mBtnRotateCamera.setVisibility(View.VISIBLE);
+        mBtnRotateCamera.setEnabled(true);
+        mBtnSave.setVisibility(View.INVISIBLE);
+        mBtnSave.setEnabled(false);
     }
 
     // chụp ảnh
@@ -355,13 +350,6 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
         mBtnRotateCamera.setEnabled(false);
         mBtnSave.setVisibility(View.VISIBLE);
         mBtnSave.setEnabled(true);
-    }
-
-    // lấy ảnh từ gallery
-    private void getImageFromAlbum() {
-        Intent photoPickerIntent = new Intent(Intent.ACTION_PICK);
-        photoPickerIntent.setType("image/*");
-        startActivityForResult(photoPickerIntent, RESULT_LOAD_IMAGE);
     }
 
     // đổi camera trước - sau
@@ -380,7 +368,7 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
                 Log.e("DIEULINH", "Bat cam sau");
                 camera.startPreview();
             } catch (RuntimeException e) {
-                Log.e("reverseCamera", e.getLocalizedMessage());
+                Log.e("DIEULINH", e.getLocalizedMessage());
             }
         } else {
             try {
@@ -389,14 +377,14 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
                 Log.e("DIEULINH", "Bat cam truoc");
                 camera.startPreview();
             } catch (RuntimeException e) {
-                Log.e("reverseCamera", e.getLocalizedMessage());
+                Log.e("DIEULINH", e.getLocalizedMessage());
             }
         }
 
     }
 
     // lưu ảnh
-    private void btSaveOnClicked(final byte[] data) {
+    private void saveToGallery(final byte[] data) {
         //Khi bat dau bam nut save image, neu dung asynctask, hanfh dong sasve image se duoc dat trong do
         //dat trong do in backgroun
         //khi qua trinh luu dang duoc thuc hien, no se nhay vaof ham onPreExecute
@@ -452,6 +440,8 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
                 File file = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/Pictures",
                         "photo_0" + ".jpg");
 
+                MediaStore.Images.Media.insertImage(getContentResolver(), bitmap, "photo_0.jpg", "demo");
+
                 try {
                     FileOutputStream fos = new FileOutputStream(file);
                     //Nen ảnh dưới dạng jpg để làm giảm dung lượng ảnh
@@ -462,12 +452,13 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
 //                    mImage.setImageBitmap(bitmap);
 //                    mImage.setVisibility(View.VISIBLE);
 
-                    Log.e("bitmap", bitmap.toString());
+                    Log.e("DIEULINH", bitmap.toString());
                     fos.flush();
                     fos.close();
+
                 } catch (IOException e) {
                     e.printStackTrace();
-                    Log.e("EXCEPTION", "EXCEPTION: " + e);
+                    Log.e("DIEULINH", "EXCEPTION: " + e);
                 }
                 return (file.getAbsolutePath());
             }
@@ -476,7 +467,7 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
             protected void onPostExecute(String s) {
                 super.onPostExecute(s);
                 Log.e("DIEULINH", "FilePath: " + s);
-                Log.e("DL", "data: " + data);
+                Log.e("DIEULINH", "data: " + data);
             }
         }.execute(data);
 
@@ -504,24 +495,44 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
     }
 
     // lấy ảnh từ gallery
+    private void getImageFromAlbum() {
+        Intent photoPickerIntent = new Intent(Intent.ACTION_PICK);
+        photoPickerIntent.setType("image/*");
+        startActivityForResult(photoPickerIntent, RESULT_LOAD_IMAGE);
+    }
+
+    // lấy ảnh từ gallery
     @Override
     protected void onActivityResult(int reqCode, int resultCode, Intent data) {
         super.onActivityResult(reqCode, resultCode, data);
 
         if (resultCode == RESULT_OK) {
-            try {
-                final Uri imageUri = data.getData();
-                final InputStream imageStream = getContentResolver().openInputStream(imageUri);
-                final Bitmap selectedImage = BitmapFactory.decodeStream(imageStream);
-                mImage.setImageBitmap(selectedImage);
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
-                Log.e("onActivityResult", e.getLocalizedMessage());
-                Toast.makeText(this, "Something went wrong", Toast.LENGTH_LONG).show();
+            switch (reqCode) {
+                case RESULT_LOAD_IMAGE:
+                    try {
+                        Log.e("DIEULINH", "onActivityResult: đã hiển thị ");
+
+                        rl_camera.setVisibility(View.GONE);
+                        rl_image.setVisibility(View.VISIBLE);
+
+                        final Uri imageUri = data.getData();
+                        final InputStream imageStream = getContentResolver().openInputStream(imageUri);
+                        final Bitmap selectedImage = BitmapFactory.decodeStream(imageStream);
+
+//                         không được
+//                        ImageFilter.applyFilter(selectedImage, ImageFilter.Filter.GRAY);
+
+                        mImage.setImageBitmap(selectedImage);
+
+                    } catch (FileNotFoundException e) {
+                        Log.e("DIEULINH", e.getLocalizedMessage());
+                        Toast.makeText(this, "Something went wrong", Toast.LENGTH_LONG).show();
+                    }
+                    break;
             }
 
         } else {
-//            Toast.makeText(this, "You haven't picked Image", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "request code != result ok", Toast.LENGTH_SHORT).show();
         }
     }
 }
