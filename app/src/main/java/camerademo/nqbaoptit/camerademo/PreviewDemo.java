@@ -71,8 +71,8 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.preview);
 
-//        requestPermissions();
-        init();
+        requestPermissions();
+//        init();
     }
 
     Camera.PictureCallback photoCallback = new Camera.PictureCallback() {
@@ -362,7 +362,6 @@ public class PreviewDemo extends Activity implements View.OnClickListener {
         Intent photoPickerIntent = new Intent(Intent.ACTION_PICK);
         photoPickerIntent.setType("image/*");
         startActivityForResult(photoPickerIntent, RESULT_LOAD_IMAGE);
-
     }
 
     // đổi camera trước - sau
